@@ -27,11 +27,8 @@ git clone git.github.com/chiquanhuo/circuitbreaker
  
 breaker := circuit.NewBreaker(0.1, 100, 5, time.Duration(5 * time.Second))
 
-
-breaker.Subscribe() // 监听错误
-
-
-if breaker.GetStatus() {
+// 监听事件
+if breaker.Subscribe() {
         // 继续进行请求第三方库
 }
 

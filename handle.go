@@ -31,11 +31,10 @@ func TestBreaker(t *testing.T) {
 	pool = newPool(*redisServer)
 	// breaker listen
 	breaker := NewBreaker(0.1, 20, 3, time.Duration(5*time.Second))
-	breaker.Subscribe()
 
 	r := gin.Default()
 	r.GET("/price/", func(c *gin.Context) {
-		if breaker.GetStatus() == false {
+		if breaker.Subscribe() == false {
 			c.JSON(200, gin.H{
 				"message": "false",
 			})

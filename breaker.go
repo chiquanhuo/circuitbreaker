@@ -4,6 +4,7 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"time"
+	"sync"
 )
 
 // Breaker ...
@@ -21,7 +22,7 @@ type Breaker struct {
 	tripper  int32 // 跳闸
 	halfopen int32
 
-	Ok chan bool // 监听是否报错
+	mutex sync.Mutex
 }
 
 // state breaker 状态
@@ -44,7 +45,6 @@ func NewBreaker(rate float64, sample int64, ConsecFailTime int64, interval time.
 		bucket:          bucket,
 		Interval:        interval,
 		ConsecFailTimes: ConsecFailTime,
-		Ok:              make(chan bool, 100),
 	}
 	breaker.Reset()
 	return breaker
@@ -60,27 +60,18 @@ func (b *Breaker) Reset() {
 
 // Call 发送事件
 func (b *Breaker) Call(val bool) {
-	b.Ok <- val
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	if val {
+		b.Success()
+	} else {
+		b.Fail()
+	}
 	return
 }
 
-// Subscribe router 接收ok 写状态
-func (b *Breaker) Subscribe() {
-	go func() {
-		for {
-			res := <-b.Ok
-			switch res {
-			case false:
-				b.Fail()
-			case true:
-				b.Success()
-			}
-		}
-	}()
-}
-
 // GetStatus 每次请求判断status
-func (b *Breaker) GetStatus() (status bool) {
+func (b *Breaker) Subscribe() (status bool) {
 	status = true
 	// 判断是否为true 或者 是否halfopen,如果halfopen则10%可以请求
 	b.IsHalfopen()
