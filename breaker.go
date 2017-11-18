@@ -1,3 +1,4 @@
+// Package circuit 实现了 Circuit-breaker pattern.
 package circuit
 
 import (
@@ -9,20 +10,18 @@ import (
 
 // Breaker ...
 type Breaker struct {
-	bucket          *Bucket
-	TripperTime     int64         // 上次tripper时间
-	HalfopenFail    int64         // 上次halfopen时失败次数
-	Interval        time.Duration // 启动breaker时间间隔
-	ErrRate         float64
-	Sample          int64
-	consecFailures  int64 // 连续错误次数
-	ConsecFailTimes int64
+	option         *Options
 
-	// breaker 状态
-	tripper  int32 // 跳闸
-	halfopen int32
+	bucket         *Bucket
+	TripperTime    int64 // 上次tripper时间
+	HalfopenFail   int64 // 上次halfopen时失败次数
+	consecFailures int64 // 连续错误次数
 
-	mutex sync.Mutex
+			     // breaker 状态
+	tripper        int32 // 跳闸
+	halfopen       int32
+
+	mutex          sync.Mutex
 }
 
 // state breaker 状态
@@ -35,22 +34,48 @@ const (
 	closed   state = iota
 )
 
+// Options         配置项
+// ErrRate         错误概率
+// Sample          测试集
+// ConsecFailTimes 连续失败次数
+// Interval        Halfopen时间间隔(s)
+// BucketTimeout   bucket失效时间(s)
+type Options struct {
+	ErrRate         float64
+	Sample          int64
+	ConsecFailTimes int64
+	Interval        int64
+	BucketTimeout   int64
+}
+
+// NewBreaker with default options
+func NewBreaker() *Breaker{
+	return NewBreakerWithOptions(nil)
+}
+
 // NewBreaker ...
-func NewBreaker(rate float64, sample int64, ConsecFailTime int64, interval time.Duration) *Breaker {
+func NewBreakerWithOptions(options *Options) *Breaker {
+	if options == nil {
+		options = &Options{
+			ErrRate:         0.1,
+			Sample:          100,
+			ConsecFailTimes: 5,
+			Interval:        5,
+			BucketTimeout:   60,
+		}
+	}
+
 	rand.Seed(time.Now().UnixNano())
-	bucket := NewBucket(time.Second * 60)
+	bucket := NewBucket(options.BucketTimeout)
 	breaker := &Breaker{
-		ErrRate:         rate,
-		Sample:          sample,
-		bucket:          bucket,
-		Interval:        interval,
-		ConsecFailTimes: ConsecFailTime,
+		option: options,
+		bucket: bucket,
 	}
 	breaker.Reset()
 	return breaker
 }
 
-// Reset ...
+// Reset 重置所有计数器
 func (b *Breaker) Reset() {
 	atomic.StoreInt64(&b.HalfopenFail, 0)
 	atomic.StoreInt32(&b.tripper, 0)
@@ -70,11 +95,11 @@ func (b *Breaker) Call(val bool) {
 	return
 }
 
-// GetStatus 每次请求判断status
+// Subscribe 每次请求判断status
 func (b *Breaker) Subscribe() (status bool) {
 	status = true
-	// 判断是否为true 或者 是否halfopen,如果halfopen则10%可以请求
-	b.IsHalfopen()
+	// 判断是否为true 或者 是否halfopen,如果halfopen则50%可以请求
+	b.Halfopen()
 	if b.Halfopened() {
 		x := rand.Intn(100)
 		if x > 50 {
@@ -102,14 +127,9 @@ func (b *Breaker) Trip() {
 	atomic.StoreInt64(&b.TripperTime, now.UnixNano())
 }
 
-// Tripped ...
+// Tripped 是否跳闸
 func (b *Breaker) Tripped() bool {
 	return atomic.LoadInt32(&b.tripper) == 1
-}
-
-// Halfopen ...
-func (b *Breaker) Halfopen() bool {
-	return atomic.LoadInt32(&b.halfopen) == 1
 }
 
 // Fail 记录失败
@@ -132,12 +152,12 @@ func (b *Breaker) Fail() {
 func (b *Breaker) ShouldTrip() bool {
 	// 失败概率大于x
 	total := b.Successes() + b.Failures()
-	if total >= b.Sample && b.bucket.ErrorRate() >= b.ErrRate {
+	if total >= b.option.Sample && b.bucket.ErrorRate() >= b.option.ErrRate {
 		return true
 	}
 
 	// 连续失败大于10次
-	if b.GetconsecFailures() >= b.ConsecFailTimes {
+	if b.GetconsecFailures() >= b.option.ConsecFailTimes {
 		return true
 	}
 
@@ -149,17 +169,17 @@ func (b *Breaker) GetconsecFailures() int64 {
 	return atomic.LoadInt64(&b.consecFailures)
 }
 
-// 获取成功次数
+// Successes 获取成功次数
 func (b *Breaker) Successes() int64 {
 	return b.bucket.Successes()
 }
 
-// 获取成功次数
+// Failures 获取成功次数
 func (b *Breaker) Failures() int64 {
 	return b.bucket.Failures()
 }
 
-// Success
+// Success 计数success
 func (b *Breaker) Success() {
 	state := b.state()
 	if state == halfopen {
@@ -167,7 +187,7 @@ func (b *Breaker) Success() {
 	} else if state == closed {
 		// 防止数据太多
 		total := b.Successes() + b.Failures()
-		if total >= b.Sample {
+		if total >= b.option.Sample {
 			b.Reset()
 		}
 	}
@@ -186,8 +206,8 @@ func (b *Breaker) state() state {
 	return closed
 }
 
-// IsHalfopen
-func (b *Breaker) IsHalfopen() {
+// Halfopen ...
+func (b *Breaker) Halfopen() {
 	tripped := b.Tripped()
 	if tripped {
 		last := atomic.LoadInt64(&b.TripperTime)
@@ -199,8 +219,19 @@ func (b *Breaker) IsHalfopen() {
 			alpha = halfopenfails
 		}
 		alpha += 1
-		if now-last > int64(b.Interval.Nanoseconds()*alpha) {
+		expire := time.Duration(b.option.Interval) * time.Second
+		if now-last > int64(expire.Nanoseconds()*alpha) {
 			atomic.StoreInt32(&b.halfopen, 1)
 		}
 	}
+}
+
+// ConsecFailures ...
+func (b *Breaker) ConsecFailures() int64 {
+	return b.consecFailures
+}
+
+// ErrorRate ...
+func (b *Breaker) ErrorRate() float64 {
+	return b.bucket.ErrorRate()
 }

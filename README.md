@@ -1,4 +1,4 @@
-## circuitbreaker
+# circuitbreaker
 
 Circuitbreaker 使用`Golang`实现退避算法。
 
@@ -7,24 +7,23 @@ Circuitbreaker 可以在项目中需要依赖第三方库时使用。项目一�
 当达到一定数量的错误时，Circuitbreaker会跳闸，将来的执行将避免远程请求第三方库并直接返回错误。
 同时，Circuitbreaker 将定期允许一些呼叫再次尝试请求第三方库，如果这些请求成功，则关闭Circuitbreaker。
 
-### Installation
+[![GoDoc](https://godoc.org/github.com/chiquanhuo/circuitbreaker?status.svg)](https://godoc.org/github.com/chiquanhuo/circuitbreaker)
 
-```bash
+## Installation
+
+```
 git clone git.github.com/chiquanhuo/circuitbreaker
 ```
 
-### Example
+## Example
 
-以下是一个简单的例子，也可以参考`handle.go`
+以下是一个简单的例子
 
-```Go
-/*
- * error_rate(错误概率):     0.1
- * minSample(最小测试集):100
- * consecFails(连续错误数): 5
- * interval(尝试请求时间):   5 sec
- */
- 
+```go
+// error_rate(错误概率):     0.1
+// minSample(最小测试集):100
+// consecFails(连续错误数): 5
+// interval(尝试请求时间):   5 sec
 breaker := circuit.NewBreaker(0.1, 100, 5, time.Duration(5 * time.Second))
 
 // 监听事件
@@ -35,4 +34,8 @@ if breaker.Subscribe() {
 
 breaker.Call(bool) // 写入请求第三方库结果
 ```
+
+## Bugs, Issues, Feedback
+
+GitHub: [https://github.com/chiquanhuo/circuitbreaker](https://github.com/chiquanhuo/circuitbreaker)
 

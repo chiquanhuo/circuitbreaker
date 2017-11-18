@@ -12,12 +12,13 @@ type Bucket struct {
 	success    int64
 }
 
-func NewBucket(timeout time.Duration) *Bucket {
+func NewBucket(timeout int64) *Bucket {
+	expire := time.Duration(timeout) * time.Second
 	return &Bucket{
 		failure:    0,
 		success:    0,
 		lastAccess: time.Now().UnixNano(),
-		timeout:    timeout,
+		timeout:    expire,
 	}
 }
 
